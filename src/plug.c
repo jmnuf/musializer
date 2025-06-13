@@ -180,6 +180,11 @@ static const char *icon_file_paths[COUNT_UI_ICONS] = {
 };
 
 typedef struct {
+    Image img;
+    Texture2D tex;
+} CustomBackground;
+
+typedef struct {
     // Assets
     Texture2D icon_textures[COUNT_UI_ICONS];
 
@@ -190,6 +195,7 @@ typedef struct {
     Shader circle;
     int circle_radius_location;
     int circle_power_location;
+    CustomBackground custom_bg;
     bool fullscreen;
 
     // Renderer
@@ -336,6 +342,24 @@ static size_t fft_analyze(float dt)
 
 static void fft_render(Rectangle boundary, size_t m)
 {
+    if (IsTextureValid(p->custom_bg.tex)) {
+        Texture2D bg = p->custom_bg.tex;
+        Rectangle source = { 0, 0, (float)bg.width, (float)bg.height };
+        Rectangle dest   = {
+            boundary.x + boundary.width/2,
+            boundary.y + boundary.height/2,
+            boundary.width,
+            boundary.height,
+        };
+        if (boundary.height < boundary.width) {
+            dest.width = source.height / source.width * boundary.height;
+        } else {
+            dest.height = source.height / source.width * boundary.width;
+        }
+        Vector2 origin = { dest.width / 2, dest.height / 2 };
+        DrawTexturePro(bg, source, dest, origin, 0, WHITE);
+    }
+
     // The width of a single bar
     float cell_width = boundary.width/m;
 
@@ -1466,6 +1490,21 @@ static void preview_screen(void)
     Track *track = current_track();
     if (track) { // The music is loaded and ready
         UpdateMusicStream(track->music);
+
+        if (IsKeyPressed(KEY_B)) {
+            char const *filter_params[] = {"*.png", "*.jpeg", "*.jpg"};
+            char *input_path = tinyfd_openFileDialog("Path to image file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "image file", 0);
+            if (input_path) {
+                if (IsTextureValid(p->custom_bg.tex)) {
+                    UnloadImage(p->custom_bg.img);
+                    UnloadTexture(p->custom_bg.tex);
+                }
+                Image img = LoadImage(input_path);
+                Texture2D tex = LoadTextureFromImage(img);
+                p->custom_bg.img = img;
+                p->custom_bg.tex = tex;
+            }
+        }
 
         if (IsKeyPressed(KEY_TOGGLE_PLAY)) {
             toggle_track_playing(track);
