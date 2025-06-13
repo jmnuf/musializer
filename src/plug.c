@@ -102,6 +102,7 @@ MUSIALIZER_PLUG void *plug_load_resource(const char *file_path, size_t *size)
 
 #define KEY_TOGGLE_PLAY KEY_SPACE
 #define KEY_RENDER      KEY_R
+#define KEY_BACKGROUND  KEY_B
 #define KEY_FULLSCREEN  KEY_F
 #define KEY_CAPTURE     KEY_C
 #define KEY_TOGGLE_MUTE KEY_M
@@ -182,6 +183,7 @@ static const char *icon_file_paths[COUNT_UI_ICONS] = {
 typedef struct {
     Image img;
     Texture2D tex;
+    bool stretch_to_screen;
 } CustomBackground;
 
 typedef struct {
@@ -235,6 +237,27 @@ typedef struct {
 } Plug;
 
 static Plug *p = NULL;
+
+static void render_custom_background(Rectangle boundary) {
+    if (!IsTextureValid(p->custom_bg.tex)) return;
+    Texture2D bg = p->custom_bg.tex;
+    Rectangle source = { 0, 0, (float)bg.width, (float)bg.height };
+    Rectangle dest   = {
+        boundary.x + boundary.width/2,
+        boundary.y + boundary.height/2,
+        boundary.width,
+        boundary.height,
+    };
+    if (!p->custom_bg.stretch_to_screen) {
+        if (boundary.height < boundary.width) {
+            dest.width = source.height / source.width * boundary.height;
+        } else {
+            dest.height = source.height / source.width * boundary.width;
+        }
+    }
+    Vector2 origin = { dest.width / 2, dest.height / 2 };
+    DrawTexturePro(bg, source, dest, origin, 0, WHITE);
+}
 
 static bool fft_settled(void)
 {
@@ -342,23 +365,7 @@ static size_t fft_analyze(float dt)
 
 static void fft_render(Rectangle boundary, size_t m)
 {
-    if (IsTextureValid(p->custom_bg.tex)) {
-        Texture2D bg = p->custom_bg.tex;
-        Rectangle source = { 0, 0, (float)bg.width, (float)bg.height };
-        Rectangle dest   = {
-            boundary.x + boundary.width/2,
-            boundary.y + boundary.height/2,
-            boundary.width,
-            boundary.height,
-        };
-        if (boundary.height < boundary.width) {
-            dest.width = source.height / source.width * boundary.height;
-        } else {
-            dest.height = source.height / source.width * boundary.width;
-        }
-        Vector2 origin = { dest.width / 2, dest.height / 2 };
-        DrawTexturePro(bg, source, dest, origin, 0, WHITE);
-    }
+    render_custom_background(boundary);
 
     // The width of a single bar
     float cell_width = boundary.width/m;
@@ -1222,6 +1229,46 @@ static int play_button_with_location(const char *file, int line, Track *track, R
     return state;
 }
 
+#define set_custom_bg_button(boundary) set_custom_bg_button_with_location(__FILE__, __LINE__, boundary)
+static int set_custom_bg_button_with_location(const char *file, int line, Rectangle boundary)
+{
+    uint64_t id = DJB2_INIT;
+    id = djb2(id, file, strlen(file));
+    id = djb2(id, &line, sizeof(line));
+
+    int state = button_with_id(id, boundary);
+
+    // TODO: Get an actual icon for this shit
+    Vector2 position = { boundary.x, boundary.y };
+    DrawTextEx(p->font, "[BG]", position, boundary.height/3*2, 0, WHITE);
+
+    tooltip(boundary, "Set Background Image [B]", SIDE_TOP, false);
+
+    return state;
+}
+
+#define stretch_custom_bg_button(boundary) stretch_custom_bg_button_with_location(__FILE__, __LINE__, boundary)
+static int stretch_custom_bg_button_with_location(const char *file, int line, Rectangle boundary)
+{
+    uint64_t id = DJB2_INIT;
+    id = djb2(id, file, strlen(file));
+    id = djb2(id, &line, sizeof(line));
+
+    int state = button_with_id(id, boundary);
+
+    // TODO: Get an actual icon for this shit
+    Vector2 position = { boundary.x, boundary.y };
+    DrawTextEx(p->font, "<S>", position, boundary.height/3*2, 0, WHITE);
+
+    if (p->custom_bg.stretch_to_screen) {
+        tooltip(boundary, "Fit Background Image", SIDE_TOP, false);
+    } else {
+        tooltip(boundary, "Stretch Background Image", SIDE_TOP, false);
+    }
+
+    return state;
+}
+
 #define render_button(boundary) \
     render_button_with_location(__FILE__, __LINE__, (boundary))
 static int render_button_with_location(const char *file, int line, Rectangle boundary)
@@ -1279,6 +1326,21 @@ static int microphone_button_with_location(const char *file, int line, Rectangle
     return state;
 }
 #endif // MUSIALIZER_MICROPHONE
+
+static void custom_bg_change_requested() {
+    char const *filter_params[] = {"*.png", "*.jpeg", "*.jpg"};
+    char *input_path = tinyfd_openFileDialog("Path to image file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "image file", 0);
+    if (input_path) {
+        if (IsTextureValid(p->custom_bg.tex)) {
+            UnloadImage(p->custom_bg.img);
+            UnloadTexture(p->custom_bg.tex);
+        }
+        Image img = LoadImage(input_path);
+        Texture2D tex = LoadTextureFromImage(img);
+        p->custom_bg.img = img;
+        p->custom_bg.tex = tex;
+    }
+}
 
 static void toggle_track_playing(Track *track)
 {
@@ -1401,6 +1463,32 @@ static bool toolbar(Track *track, Rectangle boundary)
         toggle_track_playing(track);
     }
 
+    state = set_custom_bg_button((CLITERAL(Rectangle) {
+        x,
+        boundary.y,
+        HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE,
+    }));
+    x += HUD_BUTTON_SIZE;
+    if (state & BS_CLICKED) {
+        interacted = true;
+        custom_bg_change_requested();
+    }
+
+    if (IsTextureValid(p->custom_bg.tex)) {
+        state = stretch_custom_bg_button((CLITERAL(Rectangle) {
+            x,
+            boundary.y,
+            HUD_BUTTON_SIZE,
+            HUD_BUTTON_SIZE,
+        }));
+        x += HUD_BUTTON_SIZE;
+        if (state & BS_CLICKED) {
+            interacted = true;
+            p->custom_bg.stretch_to_screen = !p->custom_bg.stretch_to_screen;
+        }
+    }
+
     state = render_button((CLITERAL(Rectangle) {
         x,
         boundary.y,
@@ -1491,19 +1579,8 @@ static void preview_screen(void)
     if (track) { // The music is loaded and ready
         UpdateMusicStream(track->music);
 
-        if (IsKeyPressed(KEY_B)) {
-            char const *filter_params[] = {"*.png", "*.jpeg", "*.jpg"};
-            char *input_path = tinyfd_openFileDialog("Path to image file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "image file", 0);
-            if (input_path) {
-                if (IsTextureValid(p->custom_bg.tex)) {
-                    UnloadImage(p->custom_bg.img);
-                    UnloadTexture(p->custom_bg.tex);
-                }
-                Image img = LoadImage(input_path);
-                Texture2D tex = LoadTextureFromImage(img);
-                p->custom_bg.img = img;
-                p->custom_bg.tex = tex;
-            }
+        if (IsKeyPressed(KEY_BACKGROUND)) {
+            custom_bg_change_requested();
         }
 
         if (IsKeyPressed(KEY_TOGGLE_PLAY)) {
