@@ -238,7 +238,7 @@ typedef struct {
 
 static Plug *p = NULL;
 
-static void render_custom_background(Rectangle boundary) {
+static void draw_custom_background(Rectangle boundary) {
     if (!IsTextureValid(p->custom_bg.tex)) return;
     Texture2D bg = p->custom_bg.tex;
     Rectangle source = { 0, 0, (float)bg.width, (float)bg.height };
@@ -249,10 +249,14 @@ static void render_custom_background(Rectangle boundary) {
         boundary.height,
     };
     if (!p->custom_bg.stretch_to_screen) {
-        if (boundary.height < boundary.width) {
-            dest.width = source.height / source.width * boundary.height;
+        float width_scale = boundary.width / source.width;
+        float height_scale = boundary.height / source.height;
+        if (width_scale < height_scale) {
+            dest.width = source.width * width_scale;
+            dest.height = source.height * width_scale;
         } else {
-            dest.height = source.height / source.width * boundary.width;
+            dest.width = source.width * height_scale;
+            dest.height = source.height * height_scale;
         }
     }
     Vector2 origin = { dest.width / 2, dest.height / 2 };
@@ -365,7 +369,7 @@ static size_t fft_analyze(float dt)
 
 static void fft_render(Rectangle boundary, size_t m)
 {
-    render_custom_background(boundary);
+    draw_custom_background(boundary);
 
     // The width of a single bar
     float cell_width = boundary.width/m;
